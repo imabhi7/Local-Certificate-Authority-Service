@@ -322,6 +322,14 @@ To demonstrate the Local Certificate Authority Service:
    - User Dashboard: Check total CSRs, pending, approved, and active certificates.
    - Admin Dashboard: View system-wide stats.
 
+## Screenshots
+
+Below are screenshots of the main interfaces of the Local Certificate Authority Service web application:
+
+| Home Page | Admin Dashboard | User Dashboard |
+|-----------|-----------------|----------------|
+| ![Home Page](screenshots/home.jpg) | ![Admin Dashboard](screenshots/admin.jpg) | ![User Dashboard](screenshots/user.jpg) |
+
 ## Troubleshooting
 
 - **Backend Errors**:
