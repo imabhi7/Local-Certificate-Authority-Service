@@ -221,6 +221,36 @@
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
 
+.certificate-table th:nth-child(1),
+.certificate-table td:nth-child(1) {
+    width: 20%;
+}
+
+.certificate-table th:nth-child(2),
+.certificate-table td:nth-child(2) {
+    width: 15%;
+}
+
+.certificate-table th:nth-child(3),
+.certificate-table td:nth-child(3) {
+    width: 25%;
+}
+
+.certificate-table th:nth-child(4),
+.certificate-table td:nth-child(4) {
+    width: 20%;
+}
+
+.certificate-table th:nth-child(5),
+.certificate-table td:nth-child(5) {
+    width: 15%;
+}
+
+.certificate-table th:nth-child(6),
+.certificate-table td:nth-child(6) {
+    width: 25%;
+}
+
 .certificate-table tr {
     transition: background 0.2s ease;
 }
@@ -303,6 +333,36 @@
     box-shadow: 0 4px 8px rgba(198, 40, 40, 0.3);
 }
 
+.load-more-container {
+    text-align: center;
+    margin-top: 1.5rem;
+}
+
+.load-more-button {
+    padding: 0.5rem 2rem;
+    background: var(--secondary-color);
+    color: var(--background-light);
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+}
+
+.load-more-button:hover {
+    background: #0087b8;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 163, 224, 0.3);
+}
+
+.load-more-button:disabled {
+    background: #b0bec5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
 .empty-state,
 .loading {
     padding: 2rem;
@@ -342,6 +402,22 @@
         font-size: 0.9rem;
         padding: 0.75rem;
     }
+
+    .certificate-table th:nth-child(1),
+    .certificate-table td:nth-child(1),
+    .certificate-table th:nth-child(2),
+    .certificate-table td:nth-child(2),
+    .certificate-table th:nth-child(3),
+    .certificate-table td:nth-child(3),
+    .certificate-table th:nth-child(4),
+    .certificate-table td:nth-child(4),
+    .certificate-table th:nth-child(5),
+    .certificate-table td:nth-child(5),
+    .certificate-table th:nth-child(6),
+    .certificate-table td:nth-child(6) {
+        width: auto;
+        min-width: 100px;
+    }
 }
 
 @media (max-width: 480px) {
@@ -358,4 +434,5 @@
     .logout-button {
         width: 100%;
         text-align: center;
-    } }
+    }
+}

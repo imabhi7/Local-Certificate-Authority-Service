@@ -20,11 +20,12 @@ export const getPendingCSRs = async () => {
   }
 };
 
-export const getAllCSRs = async () => {
+export const getAllCSRs = async (limit = 10, offset = 0) => {
   try {
     const token = localStorage.getItem("token");
     if (!token) throw new Error("No token found");
     const response = await adminApi.get("/all-csrs", {
+      params: { limit, offset },
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { getPendingCSRs, getAllCSRs, approveCSR, rejectCSR } from '../../api/adminApi';
 import { fetchAdminDashboard } from '../../api/dashboard';
 import './Admin.css';
 
-// Icons (unchanged for consistency)
+// Icons (unchanged)
 const ShieldCheck = ({ className }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -58,18 +59,24 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const [pendingCSRs, setPendingCSRs] = useState([]);
   const [historyCSRs, setHistoryCSRs] = useState([]);
+  const [displayedHistoryCSRs, setDisplayedHistoryCSRs] = useState([]);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const limit = 10;
 
-  const fetchData = async () => {
+  const fetchData = async (isLoadMore = false) => {
     try {
-      setLoading(true);
-      const [pendingResponse, allResponse, statsData] = await Promise.all([
+      setLoading(!isLoadMore);
+      const promises = [
         getPendingCSRs(),
-        getAllCSRs(),
+        getAllCSRs(limit, isLoadMore ? offset : 0),
         fetchAdminDashboard(),
-      ]);
+      ];
+
+      const [pendingResponse, allResponse, statsData] = await Promise.all(promises);
 
       if (pendingResponse.success) {
         setPendingCSRs(pendingResponse.data);
@@ -80,7 +87,18 @@ const AdminDashboard = () => {
       if (allResponse.success) {
         // Filter out pending CSRs to show only approved/rejected in history
         const history = allResponse.data.filter(csr => csr.status !== 'pending');
-        setHistoryCSRs(history);
+        if (isLoadMore) {
+          setDisplayedHistoryCSRs(prev => [...prev, ...history]);
+        } else {
+          setDisplayedHistoryCSRs(history);
+        }
+        setHistoryCSRs(allResponse.data);
+        setHasMore(allResponse.pagination.hasMore);
+        if (isLoadMore) {
+          setOffset(prev => prev + limit);
+        } else {
+          setOffset(limit);
+        }
       } else {
         setError('Failed to fetch history CSRs');
       }
@@ -104,9 +122,13 @@ const AdminDashboard = () => {
     fetchData();
 
     // Polling for updates (every 5 minutes)
-    const pollInterval = setInterval(fetchData, 300000);
+    const pollInterval = setInterval(() => fetchData(), 300000);
     return () => clearInterval(pollInterval);
   }, []);
+
+  const handleLoadMore = () => {
+    fetchData(true);
+  };
 
   const handleApprove = async (csrId) => {
     try {
@@ -145,6 +167,15 @@ const AdminDashboard = () => {
     } catch (err) {
       console.error('Error logging out:', err);
       setError('Error logging out');
+    }
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    try {
+      return format(new Date(dateString), 'MM/dd/yyyy HH:mm');
+    } catch {
+      return 'Invalid Date';
     }
   };
 
@@ -230,6 +261,7 @@ const AdminDashboard = () => {
                   <th>Domain</th>
                   <th>Username</th>
                   <th>Email</th>
+                  <th>Created At</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -240,6 +272,7 @@ const AdminDashboard = () => {
                     <td>{csr.domain}</td>
                     <td>{csr.username}</td>
                     <td>{csr.email}</td>
+                    <td>{formatDate(csr.created_at)}</td>
                     <td>
                       <span className={`status-badge ${csr.status}`}>
                         {csr.status.charAt(0).toUpperCase() + csr.status.slice(1)}
@@ -279,33 +312,44 @@ const AdminDashboard = () => {
           </div>
           {loading ? (
             <div className="loading">Loading history CSRs...</div>
-          ) : historyCSRs.length === 0 ? (
+          ) : displayedHistoryCSRs.length === 0 ? (
             <div className="empty-state">No history CSRs</div>
           ) : (
-            <table className="certificate-table">
-              <thead>
-                <tr>
-                  <th>Domain</th>
-                  <th>Username</th>
-                  <th>Email</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historyCSRs.map((csr) => (
-                  <tr key={csr.id}>
-                    <td>{csr.domain}</td>
-                    <td>{csr.username}</td>
-                    <td>{csr.email}</td>
-                    <td>
-                      <span className={`status-badge ${csr.status}`}>
-                        {csr.status.charAt(0).toUpperCase() + csr.status.slice(1)}
-                      </span>
-                    </td>
+            <>
+              <table className="certificate-table">
+                <thead>
+                  <tr>
+                    <th>Domain</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Created At</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {displayedHistoryCSRs.map((csr) => (
+                    <tr key={csr.id}>
+                      <td>{csr.domain}</td>
+                      <td>{csr.username}</td>
+                      <td>{csr.email}</td>
+                      <td>{formatDate(csr.created_at)}</td>
+                      <td>
+                        <span className={`status-badge ${csr.status}`}>
+                          {csr.status.charAt(0).toUpperCase() + csr.status.slice(1)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {hasMore && (
+                <div className="load-more-container">
+                  <button className="load-more-button" onClick={handleLoadMore}>
+                    Load More
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>

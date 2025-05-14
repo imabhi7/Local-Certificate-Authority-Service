@@ -375,10 +375,11 @@ exports.getIssuedCertificates = async (req, res) => {
 exports.getPendingCSRs = async (req, res) => {
   try {
     const csrs = await pool.query(
-      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, u.username, u.email
+      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, c.created_at, u.username, u.email
        FROM csr_requests c
        JOIN users u ON c.user_id = u.id
-       WHERE c.status = 'pending'`
+       WHERE c.status = 'pending'
+       ORDER BY c.created_at DESC`
     );
     res.json({ success: true, data: csrs.rows });
   } catch (error) {
@@ -391,12 +392,35 @@ exports.getPendingCSRs = async (req, res) => {
 
 exports.getAllCSRs = async (req, res) => {
   try {
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Fetch paginated CSRs
     const csrs = await pool.query(
-      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, u.username, u.email
+      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, c.created_at, u.username, u.email
        FROM csr_requests c
-       JOIN users u ON c.user_id = u.id`
+       JOIN users u ON c.user_id = u.id
+       ORDER BY c.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
-    res.json({ success: true, data: csrs.rows });
+
+    // Fetch total count for pagination
+    const totalResult = await pool.query(
+      `SELECT COUNT(*) as total FROM csr_requests`
+    );
+    const total = parseInt(totalResult.rows[0].total);
+
+    res.json({
+      success: true,
+      data: csrs.rows,
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + csrs.rows.length < total,
+      },
+    });
   } catch (error) {
     console.error("Error fetching all CSRs:", error);
     res
