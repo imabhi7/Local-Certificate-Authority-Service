@@ -7,6 +7,7 @@ import {
   getIssuedCertificates,
   approveCSR,
   rejectCSR,
+  deactivateOldCertificates,
   submitCSR,
   generateCSR,
   downloadFile,
@@ -24,5 +25,6 @@ router.get("/csrs", authenticateToken, getUserCSRs);
 router.get("/issued", authenticateToken, getIssuedCertificates);
 router.post("/approve/:csrId", authenticateToken, authorizeAdmin, approveCSR);
 router.post("/reject/:csrId", authenticateToken, authorizeAdmin, rejectCSR);
+router.post("/deactivate-old", authenticateToken, authorizeAdmin, deactivateOldCertificates);
 
 export default router;

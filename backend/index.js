@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcrypt";
+import cron from "node-cron";
 import dotenv from "dotenv";
 import prisma from "./config/prisma.js";
 import authRoutes from "./routes/auth.js";
 import certificateRoutes from "./routes/certificates.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import { seedCaCredentials } from "./services/caCredentials.js";
+import { deactivateExpiredCertificates } from "./services/certificateDeactivation.js";
 
 dotenv.config();
 
@@ -33,8 +35,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/certificate", certificateRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
-
-// Function to create admin user if it doesn't exist
 const createAdminIfNotExists = async () => {
   try {
     // Check if admin exists
@@ -55,7 +55,7 @@ const createAdminIfNotExists = async () => {
         },
         select: { id: true },
       });
-      console.log(`✅ Admin user created successfully with ID: ${result.id}`);
+      console.log(`Admin user created successfully with ID: ${result.id}`);
     } else {
       const adminUser = adminCheck;
       console.log(
@@ -68,7 +68,7 @@ const createAdminIfNotExists = async () => {
           where: { username: "admin" },
           data: { role: "admin", is_verified: true },
         });
-        console.log("✅ Admin user updated successfully");
+        console.log("Admin user updated successfully");
       }
     }
   } catch (err) {
@@ -76,62 +76,27 @@ const createAdminIfNotExists = async () => {
   }
 };
 
-// Debug endpoint to check database connection
-app.get("/api/debug/db", async (req, res) => {
-  try {
-    await prisma.users.count();
-    res.json({
-      success: true,
-      message: "Database connection successful",
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    console.error("Database connection error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Database connection failed",
-      error: error.message,
-    });
-  }
-});
-
-// Debug endpoint to check admin user
-app.get("/api/debug/admin", async (req, res) => {
-  try {
-    const result = await prisma.users.findUnique({
-      where: { username: "admin" },
-      select: { id: true, username: true, email: true, role: true, is_verified: true },
-    });
-    if (result) {
-      res.json({
-        success: true,
-        admin: result,
-      });
-    } else {
-      res.json({
-        success: false,
-        message: "Admin user not found",
-      });
-    }
-  } catch (error) {
-    console.error("Admin check error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error checking admin user",
-      error: error.message,
-    });
-  }
-});
-
-// Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ success: false, message: "Internal server error" });
 });
 
 const PORT = process.env.PORT || 5001;
+
+const runCertificateDeactivationJob = async () => {
+  try {
+    const result = await deactivateExpiredCertificates();
+    console.log("Certificate deactivation job completed:", result);
+  } catch (error) {
+    console.error("Certificate deactivation job failed:", error);
+  }
+};
+
+cron.schedule("0 0 * * *", runCertificateDeactivationJob);
+
 app.listen(PORT, async () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
   await seedCaCredentials();
   await createAdminIfNotExists();
+  await runCertificateDeactivationJob();
 });

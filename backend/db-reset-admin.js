@@ -27,7 +27,7 @@ async function resetAdminUser() {
       });
 
       console.log(
-        `✅ Admin user created successfully with ID: ${result.id}`
+        `Admin user created successfully with ID: ${result.id}`
       );
       console.log(`Username: admin`);
       console.log(`Password: ${adminPassword}`);

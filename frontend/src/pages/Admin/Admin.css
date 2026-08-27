@@ -61,6 +61,21 @@
     color: var(--text-dark);
 }
 
+.certificate-maintenance-button {
+    padding: 0.5rem 0.75rem;
+    background: transparent;
+    color: var(--secondary-color);
+    border: 1px solid var(--secondary-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.certificate-maintenance-button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 .user-info {
     display: flex;
     align-items: center;

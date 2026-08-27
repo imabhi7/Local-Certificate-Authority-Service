@@ -97,4 +97,19 @@ const sendOTPEmail = async (email, otp, purpose) => {
   }
 };
 
-export { sendOTPEmail };
+const sendCertificateDeactivationEmail = async (
+  email,
+  username,
+  domain,
+  issuedAt
+) => {
+  const issuedDate = new Date(issuedAt).toLocaleDateString();
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: `Certificate deactivated for ${domain}`,
+    text: `Hello ${username || "there"}, your certificate for ${domain} was deactivated because it has been active for one month (issued ${issuedDate}).`,
+  });
+};
+
+export { sendOTPEmail, sendCertificateDeactivationEmail };

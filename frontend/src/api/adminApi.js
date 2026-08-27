@@ -71,6 +71,17 @@ export const rejectCSR = async (csrId, reason) => {
   }
 };
 
+export const deactivateOldCertificates = async () => {
+  const token = localStorage.getItem("token");
+  if (!token) throw new Error("No token found");
+  const response = await adminApi.post(
+    "/deactivate-old",
+    {},
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return response.data;
+};
+
 // Admin Certificate Operations
 export const getAllCertificates = async () => {
   try {

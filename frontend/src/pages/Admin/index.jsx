@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { getPendingCSRs, getAllCSRs, approveCSR, rejectCSR } from '../../api/adminApi';
+import { getPendingCSRs, getAllCSRs, approveCSR, rejectCSR, deactivateOldCertificates } from '../../api/adminApi';
 import { fetchAdminDashboard } from '../../api/dashboard';
 import './Admin.css';
 
@@ -65,6 +65,7 @@ const AdminDashboard = () => {
   const [dashboardStats, setDashboardStats] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [deactivating, setDeactivating] = useState(false);
   const limit = 10;
 
   const fetchData = async (isLoadMore = false) => {
@@ -170,6 +171,21 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleDeactivateOldCertificates = async () => {
+    setDeactivating(true);
+    setError('');
+    try {
+      const response = await deactivateOldCertificates();
+      if (!response.success) throw new Error(response.message || 'Failed to deactivate certificates');
+      await fetchData();
+    } catch (err) {
+      console.error('Error deactivating old certificates:', err);
+      setError(err.response?.data?.message || err.message || 'Error deactivating old certificates');
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
   // Format date for display
   const formatDate = (dateString) => {
     try {
@@ -186,6 +202,14 @@ const AdminDashboard = () => {
           <div className="logo-container">
             <ShieldCheck className="logo-icon" />
             <span className="logo-text">CA Service - Admin</span>
+            <button
+              type="button"
+              className="certificate-maintenance-button"
+              onClick={handleDeactivateOldCertificates}
+              disabled={deactivating}
+            >
+              {deactivating ? 'Checking certificates...' : 'Deactivate expired'}
+            </button>
           </div>
           <div className="user-info">
             <span>Welcome, {user?.username || 'Admin'}</span>

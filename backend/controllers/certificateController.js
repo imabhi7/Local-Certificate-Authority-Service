@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import nodemailer from "nodemailer";
 import { getCaCredentials } from "../services/caCredentials.js";
+import { deactivateExpiredCertificates } from "../services/certificateDeactivation.js";
 
 const moduleFilename = fileURLToPath(import.meta.url);
 const moduleDirectory = path.dirname(moduleFilename);
@@ -596,6 +597,23 @@ const rejectCSR = async (req, res) => {
   }
 };
 
+const deactivateOldCertificates = async (req, res) => {
+  try {
+    const result = await deactivateExpiredCertificates();
+    res.json({
+      success: true,
+      message: `${result.deactivatedCount} certificate(s) deactivated`,
+      ...result,
+    });
+  } catch (error) {
+    console.error("Error deactivating old certificates:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error deactivating old certificates",
+    });
+  }
+};
+
 async function sendCertificateApprovalEmail(
   email,
   username,
@@ -660,4 +678,5 @@ export {
   getAdminDashboardStats,
   approveCSR,
   rejectCSR,
+  deactivateOldCertificates,
 };
