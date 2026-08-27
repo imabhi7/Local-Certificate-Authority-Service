@@ -1,15 +1,18 @@
-const fs = require("fs").promises;
-const path = require("path");
-const pool = require("./config/db");
+import { promises as fs } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import prisma from "./config/prisma.js";
 
-const CSR_DIR = path.join(__dirname, "csr_files"); // Correct path: backend/csr_files
+const moduleFilename = fileURLToPath(import.meta.url);
+const moduleDirectory = path.dirname(moduleFilename);
+const CSR_DIR = path.join(moduleDirectory, "csr_files"); // Correct path: backend/csr_files
 
 async function migrateCsrFiles() {
   try {
-    const csrs = await pool.query("SELECT id, domain FROM csr_requests");
-    console.log(`Found ${csrs.rowCount} CSRs in the database`);
+    const csrs = await prisma.csr_requests.findMany({ select: { id: true, domain: true } });
+    console.log(`Found ${csrs.length} CSRs in the database`);
 
-    for (const { id, domain } of csrs.rows) {
+    for (const { id, domain } of csrs) {
       const newFile = path.join(CSR_DIR, `csr_${id}.pem`);
       const legacyFiles = [
         path.join(CSR_DIR, `csr_${domain}.pem`), // e.g., csr_caauth.com.pem
@@ -45,7 +48,7 @@ async function migrateCsrFiles() {
   } catch (error) {
     console.error("Error migrating CSR files:", error);
   } finally {
-    await pool.end();
+    await prisma.$disconnect();
   }
 }
 

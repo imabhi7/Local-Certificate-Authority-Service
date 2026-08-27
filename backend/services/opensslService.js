@@ -1,11 +1,14 @@
-const openssl = require('openssl-nodejs');
+import openssl from "openssl-nodejs";
+import express from "express";
+import bodyParser from "body-parser";
+import cors from "cors";
+import { exec } from "child_process";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const express = require("express");
-const bodyParser = require("body-parser");
-const cors = require("cors");
-const { exec } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+const moduleFilename = fileURLToPath(import.meta.url);
+const moduleDirectory = path.dirname(moduleFilename);
 
 const app = express();
 const PORT = 5000;
@@ -13,7 +16,7 @@ const PORT = 5000;
 app.use(cors());
 app.use(bodyParser.json());
 
-const CSR_DIR = path.join(__dirname, "csrs");
+const CSR_DIR = path.join(moduleDirectory, "csrs");
 
 // Ensure the directory exists
 if (!fs.existsSync(CSR_DIR)) {
@@ -70,7 +73,7 @@ emailAddress = ${email}
   });
 });
 
-exports.generateCSR = (csrDetails) => {
+export const generateCSR = (csrDetails) => {
   return new Promise((resolve, reject) => {
     const { commonName, organization, country, state, city, email } = csrDetails;
 

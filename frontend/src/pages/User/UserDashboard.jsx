@@ -3,9 +3,26 @@
 import React, { useEffect, useState } from "react"
 import { useAuth } from "../../contexts/AuthContext"
 import { useNavigate } from "react-router-dom"
-import { generateCSR, submitCSR, getUserCSRs, getIssuedCertificates, downloadCSR, downloadCertificate } from "../../api/certificateApi"
+import { generateCSR, getUserCSRs, getIssuedCertificates, downloadCSR, downloadCertificate } from "../../api/certificateApi"
 import { fetchUserDashboard } from '../../api/dashboard'
 import "./UserDashboard.css"
+
+const fallbackCountries = [
+  { name: "Australia", code: "AU" },
+  { name: "Brazil", code: "BR" },
+  { name: "Canada", code: "CA" },
+  { name: "China", code: "CN" },
+  { name: "France", code: "FR" },
+  { name: "Germany", code: "DE" },
+  { name: "India", code: "IN" },
+  { name: "Japan", code: "JP" },
+  { name: "New Zealand", code: "NZ" },
+  { name: "Singapore", code: "SG" },
+  { name: "South Africa", code: "ZA" },
+  { name: "United Arab Emirates", code: "AE" },
+  { name: "United Kingdom", code: "GB" },
+  { name: "United States", code: "US" },
+]
 
 // Icons
 const ShieldCheck = ({ className }) => (
@@ -146,8 +163,6 @@ const UserDashboard = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [successMessage, setSuccessMessage] = useState("")
   const [formError, setFormError] = useState("")
-  const [csrFile, setCsrFile] = useState(null)
-  const [csrId, setCsrId] = useState(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [countries, setCountries] = useState([])
   const [csrs, setCsrs] = useState([])
@@ -187,19 +202,25 @@ const UserDashboard = () => {
   }, [searchTerm])
 
   useEffect(() => {
-    // Fetch countries
+    setCountries(fallbackCountries)
+
+    // Use the API when available, while keeping the form usable offline.
     fetch("https://restcountries.com/v3.1/all")
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok) throw new Error(`Countries request failed: ${response.status}`)
+        return response.json()
+      })
       .then((data) => {
         const countryList = data
+          .filter((country) => country.cca2 && country.name?.common)
           .map((country) => ({
             name: country.name.common,
             code: country.cca2,
           }))
           .sort((a, b) => a.name.localeCompare(b.name))
-        setCountries(countryList)
+        if (countryList.length > 0) setCountries(countryList)
       })
-      .catch((error) => console.error("Error fetching countries:", error))
+      .catch((error) => console.warn("Using local country list:", error.message))
 
     // Load notifications from localStorage
     const storedNotifications = localStorage.getItem("userNotifications")
@@ -320,8 +341,6 @@ const UserDashboard = () => {
     e.preventDefault()
     setFormError("")
     setSuccessMessage("")
-    setCsrFile(null)
-    setCsrId(null)
 
     try {
       const username = user?.username
@@ -341,17 +360,8 @@ const UserDashboard = () => {
       const result = await generateCSR(formDataWithUser)
 
       if (result.success) {
-        const { csr, privateKey, csrFile, data } = result
-        setCsrFile(csrFile)
-        setCsrId(data.id)
+        const { csr, privateKey } = result
         setSuccessMessage("CSR generated and submitted successfully!")
-
-        // Submit CSR to backend
-        await submitCSR({
-          ...formData,
-          csr,
-          root_length: formData.rootLength,
-        })
 
         // Download CSR
         const csrBlob = new Blob([csr], { type: "text/plain" })
@@ -384,6 +394,8 @@ const UserDashboard = () => {
             status: csr.status || "unknown",
           })))
         }
+
+        closeDialog()
       } else {
         setFormError(result.message || "Failed to generate CSR. Please check your inputs and try again.")
       }
@@ -397,6 +409,7 @@ const UserDashboard = () => {
     try {
       if (type === "csr") {
         await downloadCSR(`csr_${id}.pem`)
+        if (isDialogOpen) closeDialog()
       } else if (type === "certificate") {
         await downloadCertificate(id, domain)
       }
@@ -430,8 +443,6 @@ const UserDashboard = () => {
 
   const closeDialog = () => {
     setIsDialogOpen(false)
-    setCsrFile(null)
-    setCsrId(null)
     setFormError("")
     setSuccessMessage("")
     setFormData({
@@ -950,24 +961,6 @@ const UserDashboard = () => {
               </div>
             </form>
 
-            {csrFile && (
-              <div className="download-section">
-                <h3 className="download-title">
-                  <ShieldCheck className="download-icon" />
-                  Your CSR has been generated successfully!
-                </h3>
-                <p>CSR File: {csrFile}</p>
-                <div className="download-buttons">
-                  <button
-                    type="button"
-                    onClick={() => handleDownload(csrId, formData.domain, "csr")}
-                    className="download-button"
-                  >
-                    Download CSR
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

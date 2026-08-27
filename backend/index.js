@@ -1,19 +1,25 @@
-const express = require("express");
-const cors = require("cors");
-const bcrypt = require("bcrypt");
-const pool = require("./config/db");
-const authRoutes = require("./routes/auth");
-const certificateRoutes = require("./routes/certificates");
-const dashboardRoutes = require("./routes/dashboardRoutes"); // Updated to dashboardRoutes
-require("dotenv").config();
+import express from "express";
+import cors from "cors";
+import bcrypt from "bcrypt";
+import dotenv from "dotenv";
+import prisma from "./config/prisma.js";
+import authRoutes from "./routes/auth.js";
+import certificateRoutes from "./routes/certificates.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
+import { seedCaCredentials } from "./services/caCredentials.js";
+
+dotenv.config();
 
 const app = express();
 
-app.use(express.json());
-
-// CORS configuration
 const corsOptions = {
-  origin: ["http://127.0.0.1:5173", "http://localhost:5173"],
+  origin: [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+  ],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
@@ -21,56 +27,47 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Debug CORS headers
-app.use((req, res, next) => {
-  console.log(`Request Origin: ${req.get("Origin")}`);
-  console.log(
-    `CORS Headers Set: Access-Control-Allow-Origin: ${
-      res.get("Access-Control-Allow-Origin") || "Not set yet"
-    }`
-  );
-  next();
-});
-
-// Handle CORS preflight requests
-app.options("*", cors(corsOptions));
+app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/certificate", certificateRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 
+
 // Function to create admin user if it doesn't exist
 const createAdminIfNotExists = async () => {
   try {
     // Check if admin exists
-    const adminCheck = await pool.query(
-      "SELECT * FROM users WHERE username = $1",
-      ["admin"]
-    );
+    const adminCheck = await prisma.users.findUnique({ where: { username: "admin" } });
 
-    console.log(`Admin check found ${adminCheck.rows.length} rows`);
+    console.log(`Admin check found ${adminCheck ? 1 : 0} rows`);
 
-    if (adminCheck.rows.length === 0) {
+    if (!adminCheck) {
       console.log("Admin user does not exist, creating...");
       const hashedPassword = await bcrypt.hash("admin@123", 10);
-      const result = await pool.query(
-        "INSERT INTO users (username, email, password, role, is_verified) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-        ["admin", "caservice2025@gmail.com", hashedPassword, "admin", true]
-      );
-      console.log(
-        `✅ Admin user created successfully with ID: ${result.rows[0].id}`
-      );
+      const result = await prisma.users.create({
+        data: {
+          username: "admin",
+          email: "caservice2025@gmail.com",
+          password: hashedPassword,
+          role: "admin",
+          is_verified: true,
+        },
+        select: { id: true },
+      });
+      console.log(`✅ Admin user created successfully with ID: ${result.id}`);
     } else {
-      const adminUser = adminCheck.rows[0];
+      const adminUser = adminCheck;
       console.log(
         `Admin user exists with ID: ${adminUser.id}, role: ${adminUser.role}, verified: ${adminUser.is_verified}`
       );
 
       if (adminUser.role !== "admin" || !adminUser.is_verified) {
         console.log("Updating admin user role and verification status");
-        await pool.query(
-          "UPDATE users SET role = 'admin', is_verified = true WHERE username = 'admin'"
-        );
+        await prisma.users.update({
+          where: { username: "admin" },
+          data: { role: "admin", is_verified: true },
+        });
         console.log("✅ Admin user updated successfully");
       }
     }
@@ -82,11 +79,11 @@ const createAdminIfNotExists = async () => {
 // Debug endpoint to check database connection
 app.get("/api/debug/db", async (req, res) => {
   try {
-    const result = await pool.query("SELECT NOW()");
+    await prisma.users.count();
     res.json({
       success: true,
       message: "Database connection successful",
-      timestamp: result.rows[0].now,
+      timestamp: new Date(),
     });
   } catch (error) {
     console.error("Database connection error:", error);
@@ -101,13 +98,14 @@ app.get("/api/debug/db", async (req, res) => {
 // Debug endpoint to check admin user
 app.get("/api/debug/admin", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT id, username, email, role, is_verified FROM users WHERE username = 'admin'"
-    );
-    if (result.rows.length > 0) {
+    const result = await prisma.users.findUnique({
+      where: { username: "admin" },
+      select: { id: true, username: true, email: true, role: true, is_verified: true },
+    });
+    if (result) {
       res.json({
         success: true,
-        admin: result.rows[0],
+        admin: result,
       });
     } else {
       res.json({
@@ -131,8 +129,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: "Internal server error" });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, async () => {
   console.log(`✅ Server running on port ${PORT}`);
+  await seedCaCredentials();
   await createAdminIfNotExists();
 });

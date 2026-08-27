@@ -1,5 +1,5 @@
-const jwt = require("jsonwebtoken");
-const pool = require("../config/db");
+import jwt from "jsonwebtoken";
+import prisma from "../config/prisma.js";
 
 const authenticateToken = async (req, res, next) => {
   try {
@@ -35,12 +35,12 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // Fetch user from database
-    const userResult = await pool.query(
-      "SELECT id, username, role FROM users WHERE id = $1",
-      [decoded.userId]
-    );
+    const userResult = await prisma.users.findUnique({
+      where: { id: decoded.userId },
+      select: { id: true, username: true, role: true },
+    });
 
-    if (userResult.rowCount === 0) {
+    if (!userResult) {
       console.error(
         `Authentication failed: User ID ${decoded.userId} not found`
       );
@@ -50,7 +50,7 @@ const authenticateToken = async (req, res, next) => {
     }
 
     // Attach user to request
-    req.user = userResult.rows[0];
+    req.user = userResult;
     next();
   } catch (error) {
     console.error("Authentication error:", error.message);
@@ -79,4 +79,4 @@ const authorizeRole = (role) => {
 
 const authorizeAdmin = authorizeRole("admin");
 
-module.exports = { authenticateToken, authorizeRole, authorizeAdmin };
+export { authenticateToken, authorizeRole, authorizeAdmin };

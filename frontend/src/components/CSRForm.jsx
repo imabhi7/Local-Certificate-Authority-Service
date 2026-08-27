@@ -1,6 +1,23 @@
 import React, { useState } from 'react';
 import { generateCSR, downloadFile } from '../api/certificateApi';
 
+const countries = [
+  ['IN', 'India'],
+  ['US', 'United States'],
+  ['CA', 'Canada'],
+  ['GB', 'United Kingdom'],
+  ['AU', 'Australia'],
+  ['DE', 'Germany'],
+  ['FR', 'France'],
+  ['JP', 'Japan'],
+  ['CN', 'China'],
+  ['SG', 'Singapore'],
+  ['AE', 'United Arab Emirates'],
+  ['BR', 'Brazil'],
+  ['ZA', 'South Africa'],
+  ['NZ', 'New Zealand'],
+];
+
 const CSRForm = () => {
   const [formData, setFormData] = useState({
     domain: '',
@@ -44,16 +61,34 @@ const CSRForm = () => {
       <h2 className="text-xl font-bold mb-4">Generate CSR</h2>
       <form onSubmit={handleSubmit} className="space-y-3">
         {Object.entries(formData).map(([field, value]) => (
-          <input
-            key={field}
-            type="text"
-            name={field}
-            placeholder={field}
-            value={value}
-            onChange={handleChange}
-            className="w-full p-2 border rounded"
-            required
-          />
+          field === 'country' ? (
+            <select
+              key={field}
+              name={field}
+              value={value}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
+            >
+              <option value="">Select country</option>
+              {countries.map(([code, name]) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              key={field}
+              type="text"
+              name={field}
+              placeholder={field}
+              value={value}
+              onChange={handleChange}
+              className="w-full p-2 border rounded"
+              required
+            />
+          )
         ))}
         <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded">
           Submit

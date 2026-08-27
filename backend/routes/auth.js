@@ -1,7 +1,7 @@
-const express = require("express");
+import express from "express";
 const router = express.Router();
-const authController = require("../controllers/authController");
-const { authenticateToken, authorizeAdmin } = require("../middleware/auth");
+import * as authController from "../controllers/authController.js";
+import { authenticateToken, authorizeAdmin } from "../middleware/auth.js";
 
 // Routes
 router.post("/signin", authController.signin);
@@ -36,4 +36,4 @@ router.get("/user", authenticateToken, (req, res) => {
   });
 });
 
-module.exports = router;
+export default router;

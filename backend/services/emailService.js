@@ -1,5 +1,12 @@
-const nodemailer = require("nodemailer");
-require("dotenv").config();
+import nodemailer from "nodemailer";
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
+const moduleFilename = fileURLToPath(import.meta.url);
+const moduleDirectory = path.dirname(moduleFilename);
+
+dotenv.config({ path: path.join(moduleDirectory, "../.env") });
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -78,12 +85,16 @@ const sendOTPEmail = async (email, otp, purpose) => {
     console.log(`OTP email sent to ${email} with type: ${type}`);
     return true;
   } catch (error) {
-    console.error("Email sending failed:", {
-      message: error.message,
-      stack: error.stack,
-    });
+    console.error("Email sending failed:", error.message);
+
+    if (error.responseCode === 534 || error.code === "EAUTH") {
+      throw new Error(
+        "Gmail rejected the SMTP login. Enable 2-Step Verification and set EMAIL_PASSWORD to a Google App Password."
+      );
+    }
+
     throw new Error("Failed to send OTP email");
   }
 };
 
-module.exports = { sendOTPEmail };
+export { sendOTPEmail };

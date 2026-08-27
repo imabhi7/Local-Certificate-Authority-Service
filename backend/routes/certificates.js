@@ -1,6 +1,6 @@
-const express = require("express");
+import express from "express";
 const router = express.Router();
-const {
+import {
   getPendingCSRs,
   getAllCSRs,
   getUserCSRs,
@@ -11,8 +11,8 @@ const {
   generateCSR,
   downloadFile,
   downloadCertificate,
-} = require("../controllers/certificateController");
-const { authenticateToken, authorizeAdmin } = require("../middleware/auth");
+} from "../controllers/certificateController.js";
+import { authenticateToken, authorizeAdmin } from "../middleware/auth.js";
 
 router.post("/generate-csr", authenticateToken, generateCSR);
 router.post("/submit", authenticateToken, submitCSR);
@@ -25,4 +25,4 @@ router.get("/issued", authenticateToken, getIssuedCertificates);
 router.post("/approve/:csrId", authenticateToken, authorizeAdmin, approveCSR);
 router.post("/reject/:csrId", authenticateToken, authorizeAdmin, rejectCSR);
 
-module.exports = router;
+export default router;

@@ -1,20 +1,19 @@
-const pool = require("../config/db");
-const forge = require("node-forge");
-const fs = require("fs");
-const fsPromises = require("fs").promises;
-const path = require("path");
-const { exec } = require("child_process");
-const nodemailer = require("nodemailer");
+import prisma from "../config/prisma.js";
+import forge from "node-forge";
+import fs from "fs";
+import { promises as fsPromises } from "fs";
+import os from "os";
+import path from "path";
+import { fileURLToPath } from "url";
+import { exec } from "child_process";
+import nodemailer from "nodemailer";
+import { getCaCredentials } from "../services/caCredentials.js";
 
-const CSR_DIR = path.join(__dirname, "../csr_files");
-const CERT_DIR = path.join(__dirname, "../certificates");
-const CA_CERT_PATH = path.join(__dirname, "../certs/ca-cert.pem");
-const CA_KEY_PATH = path.join(__dirname, "../certs/ca-key.pem");
+const moduleFilename = fileURLToPath(import.meta.url);
+const moduleDirectory = path.dirname(moduleFilename);
+const CERT_DIR = path.join(moduleDirectory, "../certificates");
 
-// Ensure CSR and Certificate directories exist
-if (!fs.existsSync(CSR_DIR)) {
-  fs.mkdirSync(CSR_DIR, { recursive: true });
-}
+// Ensure certificate files can still be written for certificate issuance.
 if (!fs.existsSync(CERT_DIR)) {
   fs.mkdirSync(CERT_DIR, { recursive: true });
 }
@@ -45,7 +44,7 @@ async function withRetry(fn, retries = 3, delayMs = 1000) {
   }
 }
 
-exports.generateCSR = async (req, res) => {
+const generateCSR = async (req, res) => {
   try {
     const {
       domain,
@@ -75,21 +74,23 @@ exports.generateCSR = async (req, res) => {
     }
 
     // Fetch user ID
-    const userCheck = await pool.query(
-      "SELECT id FROM users WHERE username = $1",
-      [username]
-    );
-    if (userCheck.rowCount === 0) {
+    const user = await prisma.users.findUnique({
+      where: { username },
+      select: { id: true },
+    });
+    if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
-    const user_id = userCheck.rows[0].id;
+    const user_id = user.id;
 
     // Generate CSR and private key
-    const tempId = Date.now();
-    const csrFilePath = path.join(CSR_DIR, `csr_${tempId}.pem`);
-    const privateKeyPath = path.join(CSR_DIR, `key_${tempId}.pem`);
+    const tempDirectory = await fsPromises.mkdtemp(
+      path.join(os.tmpdir(), "local-ca-csr-")
+    );
+    const csrFilePath = path.join(tempDirectory, "request.pem");
+    const privateKeyPath = path.join(tempDirectory, "private-key.pem");
 
     // Escape shell arguments
     const escapeShellArg = (arg) => `'${arg.replace(/'/g, "'\\''")}'`;
@@ -130,41 +131,30 @@ exports.generateCSR = async (req, res) => {
     }
 
     // Insert into database
-    const insertQuery = `
-      INSERT INTO csr_requests (user_id, domain, company, division, city, state, country, email, root_length, csr, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
-      RETURNING id, created_at;
-    `;
-    const values = [
-      user_id,
-      domain,
-      company,
-      division,
-      city,
-      state,
-      country,
-      email,
-      rootLength,
-      csrContent,
-    ];
-    const result = await pool.query(insertQuery, values);
-    const csrId = result.rows[0].id;
-    const created_at = result.rows[0].created_at;
+    const result = await prisma.csr_requests.create({
+      data: {
+        user_id,
+        domain,
+        company,
+        division,
+        city,
+        state,
+        country,
+        email,
+        root_length: Number(rootLength),
+        csr: csrContent,
+        status: "pending",
+      },
+      select: { id: true, created_at: true },
+    });
+    const csrId = result.id;
+    const created_at = result.created_at;
 
-    // Rename CSR file to match database ID
-    if (tempId !== csrId) {
-      const newCsrFilePath = path.join(CSR_DIR, `csr_${csrId}.pem`);
-      await fsPromises.rename(csrFilePath, newCsrFilePath);
-      console.log(`Renamed ${csrFilePath} to ${newCsrFilePath}`);
-    }
-
-    // Delete private key
-    try {
-      await fsPromises.unlink(privateKeyPath);
-      console.log(`Deleted private key: ${privateKeyPath}`);
-    } catch (unlinkError) {
-      console.warn(`Failed to delete private key: ${unlinkError.message}`);
-    }
+    await Promise.all([
+      fsPromises.unlink(csrFilePath),
+      fsPromises.unlink(privateKeyPath),
+      fsPromises.rmdir(tempDirectory),
+    ]);
 
     res.status(201).json({
       success: true,
@@ -183,7 +173,7 @@ exports.generateCSR = async (req, res) => {
   }
 };
 
-exports.submitCSR = async (req, res) => {
+const submitCSR = async (req, res) => {
   const {
     domain,
     company,
@@ -214,12 +204,9 @@ exports.submitCSR = async (req, res) => {
       });
     }
 
-    const result = await pool.query(
-      `INSERT INTO csr_requests (user_id, domain, company, division, city, state, country, email, root_length, csr, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
-       RETURNING id, domain, status, created_at`,
-      [
-        userId,
+    const result = await prisma.csr_requests.create({
+      data: {
+        user_id: userId,
         domain,
         company,
         division,
@@ -227,22 +214,21 @@ exports.submitCSR = async (req, res) => {
         state,
         country,
         email,
-        root_length,
+        root_length: Number(root_length),
         csr,
-      ]
-    );
+        status: "pending",
+      },
+      select: { id: true, domain: true, status: true, created_at: true },
+    });
 
-    const csrFilePath = path.join(CSR_DIR, `csr_${result.rows[0].id}.pem`);
-    await fsPromises.writeFile(csrFilePath, csr);
-
-    res.status(201).json({ success: true, data: result.rows[0] });
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
     console.error("Error submitting CSR:", error);
     res.status(500).json({ success: false, message: "Error submitting CSR" });
   }
 };
 
-exports.downloadFile = async (req, res) => {
+const downloadFile = async (req, res) => {
   const fileName = req.params.filename;
   const userId = req.user.id;
 
@@ -257,70 +243,53 @@ exports.downloadFile = async (req, res) => {
     const csrId = csrIdMatch[1];
 
     // Verify user ownership
-    const csrCheck = await pool.query(
-      "SELECT user_id, domain, csr FROM csr_requests WHERE id = $1",
-      [csrId]
-    );
-    if (csrCheck.rowCount === 0 || csrCheck.rows[0].user_id !== userId) {
+    const csrCheck = await prisma.csr_requests.findUnique({
+      where: { id: Number(csrId) },
+      select: { user_id: true, domain: true, csr: true },
+    });
+    if (!csrCheck || csrCheck.user_id !== userId) {
       return res
         .status(403)
         .json({ success: false, message: "Unauthorized to download this CSR" });
     }
 
-    // Try serving the file
-    const filePath = path.join(CSR_DIR, fileName);
-    if (fs.existsSync(filePath)) {
-      res.download(filePath, fileName, (err) => {
-        if (err) {
-          console.error("Error downloading file:", err);
-          res
-            .status(500)
-            .json({ success: false, message: "Error downloading file" });
-        }
+    if (!csrCheck.csr) {
+      return res.status(404).json({
+        success: false,
+        message: "CSR content not found in database",
       });
-    } else {
-      // Fallback to database content
-      console.log(`File not found: ${filePath}, serving from database`);
-      const { csr, domain } = csrCheck.rows[0];
-      if (!csr) {
-        return res.status(404).json({
-          success: false,
-          message: "CSR content not found in database",
-        });
-      }
-      res.setHeader("Content-Type", "application/octet-stream");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"`
-      );
-      res.send(csr);
     }
+
+    res.setHeader("Content-Type", "application/pkcs10");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`
+    );
+    res.send(csrCheck.csr);
   } catch (error) {
     console.error("Error in downloadFile:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
-exports.downloadCertificate = async (req, res) => {
+const downloadCertificate = async (req, res) => {
   const { certId } = req.params;
   const userId = req.user.id;
 
   try {
-    const cert = await pool.query(
-      `SELECT certificate, domain
-       FROM issued_certificates
-       WHERE id = $1 AND user_id = $2`,
-      [certId, userId]
-    );
+    const cert = await prisma.issued_certificates.findFirst({
+      where: { id: Number(certId), user_id: userId },
+      select: { certificate: true, domain: true },
+    });
 
-    if (cert.rows.length === 0) {
+    if (!cert) {
       return res.status(404).json({
         success: false,
         message: "Certificate not found or not authorized",
       });
     }
 
-    const { certificate, domain } = cert.rows[0];
+    const { certificate, domain } = cert;
     const fileName = `${domain}_cert.pem`;
 
     res.setHeader("Content-Type", "application/octet-stream");
@@ -334,17 +303,15 @@ exports.downloadCertificate = async (req, res) => {
   }
 };
 
-exports.getUserCSRs = async (req, res) => {
+const getUserCSRs = async (req, res) => {
   try {
     const userId = req.user.id;
-    const csrs = await pool.query(
-      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, c.created_at
-       FROM csr_requests c
-       WHERE c.user_id = $1
-       ORDER BY c.created_at DESC`,
-      [userId]
-    );
-    res.json({ success: true, data: csrs.rows });
+    const csrs = await prisma.csr_requests.findMany({
+      where: { user_id: userId },
+      select: { id: true, domain: true, csr: true, status: true, rejection_reason: true, created_at: true },
+      orderBy: { created_at: "desc" },
+    });
+    res.json({ success: true, data: csrs });
   } catch (error) {
     console.error("Error fetching user CSRs:", error);
     res
@@ -353,17 +320,15 @@ exports.getUserCSRs = async (req, res) => {
   }
 };
 
-exports.getIssuedCertificates = async (req, res) => {
+const getIssuedCertificates = async (req, res) => {
   try {
     const userId = req.user.id;
-    const certificates = await pool.query(
-      `SELECT ic.id, ic.domain, ic.certificate, ic.status, ic.issued_at, ic.valid_till
-       FROM issued_certificates ic
-       WHERE ic.user_id = $1
-       ORDER BY ic.issued_at DESC`,
-      [userId]
-    );
-    res.json({ success: true, data: certificates.rows });
+    const certificates = await prisma.issued_certificates.findMany({
+      where: { user_id: userId },
+      select: { id: true, domain: true, certificate: true, status: true, issued_at: true, valid_till: true },
+      orderBy: { issued_at: "desc" },
+    });
+    res.json({ success: true, data: certificates });
   } catch (error) {
     console.error("Error fetching issued certificates:", error);
     res
@@ -372,16 +337,17 @@ exports.getIssuedCertificates = async (req, res) => {
   }
 };
 
-exports.getPendingCSRs = async (req, res) => {
+const getPendingCSRs = async (req, res) => {
   try {
-    const csrs = await pool.query(
-      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, c.created_at, u.username, u.email
-       FROM csr_requests c
-       JOIN users u ON c.user_id = u.id
-       WHERE c.status = 'pending'
-       ORDER BY c.created_at DESC`
-    );
-    res.json({ success: true, data: csrs.rows });
+    const csrs = await prisma.csr_requests.findMany({
+      where: { status: "pending" },
+      select: {
+        id: true, domain: true, csr: true, status: true, rejection_reason: true, created_at: true,
+        users: { select: { username: true, email: true } },
+      },
+      orderBy: { created_at: "desc" },
+    });
+    res.json({ success: true, data: csrs.map(({ users, ...csr }) => ({ ...csr, ...users })) });
   } catch (error) {
     console.error("Error fetching pending CSRs:", error);
     res
@@ -390,35 +356,33 @@ exports.getPendingCSRs = async (req, res) => {
   }
 };
 
-exports.getAllCSRs = async (req, res) => {
+const getAllCSRs = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     const offset = parseInt(req.query.offset) || 0;
 
-    // Fetch paginated CSRs
-    const csrs = await pool.query(
-      `SELECT c.id, c.domain, c.csr, c.status, c.rejection_reason, c.created_at, u.username, u.email
-       FROM csr_requests c
-       JOIN users u ON c.user_id = u.id
-       ORDER BY c.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
-
-    // Fetch total count for pagination
-    const totalResult = await pool.query(
-      `SELECT COUNT(*) as total FROM csr_requests`
-    );
-    const total = parseInt(totalResult.rows[0].total);
+    const [csrs, total] = await Promise.all([
+      prisma.csr_requests.findMany({
+        skip: offset,
+        take: limit,
+        select: {
+          id: true, domain: true, csr: true, status: true, rejection_reason: true, created_at: true,
+          users: { select: { username: true, email: true } },
+        },
+        orderBy: { created_at: "desc" },
+      }),
+      prisma.csr_requests.count(),
+    ]);
+    const data = csrs.map(({ users, ...csr }) => ({ ...csr, ...users }));
 
     res.json({
       success: true,
-      data: csrs.rows,
+      data,
       pagination: {
         total,
         limit,
         offset,
-        hasMore: offset + csrs.rows.length < total,
+        hasMore: offset + data.length < total,
       },
     });
   } catch (error) {
@@ -429,18 +393,16 @@ exports.getAllCSRs = async (req, res) => {
   }
 };
 
-exports.getUserDashboardStats = async (req, res) => {
+const getUserDashboardStats = async (req, res) => {
   try {
     const userId = req.user.id;
-    const stats = await pool.query(
-      `SELECT 
-        (SELECT COUNT(*) FROM csr_requests WHERE user_id = $1) AS total_csrs,
-        (SELECT COUNT(*) FROM csr_requests WHERE user_id = $1 AND status = 'pending') AS pending_csrs,
-        (SELECT COUNT(*) FROM csr_requests WHERE user_id = $1 AND status = 'approved') AS approved_csrs,
-        (SELECT COUNT(*) FROM issued_certificates WHERE user_id = $1 AND status = 'active') AS active_certs`,
-      [userId]
-    );
-    res.json({ success: true, data: stats.rows[0] });
+    const [totalCsrs, pendingCsrs, approvedCsrs, activeCerts] = await Promise.all([
+      prisma.csr_requests.count({ where: { user_id: userId } }),
+      prisma.csr_requests.count({ where: { user_id: userId, status: "pending" } }),
+      prisma.csr_requests.count({ where: { user_id: userId, status: "approved" } }),
+      prisma.issued_certificates.count({ where: { user_id: userId, status: "active" } }),
+    ]);
+    res.json({ success: true, data: { total_csrs: String(totalCsrs), pending_csrs: String(pendingCsrs), approved_csrs: String(approvedCsrs), active_certs: String(activeCerts) } });
   } catch (error) {
     console.error("Error fetching user dashboard stats:", error);
     res
@@ -449,16 +411,15 @@ exports.getUserDashboardStats = async (req, res) => {
   }
 };
 
-exports.getAdminDashboardStats = async (req, res) => {
+const getAdminDashboardStats = async (req, res) => {
   try {
-    const stats = await pool.query(
-      `SELECT 
-        (SELECT COUNT(*) FROM csr_requests) AS total_csrs,
-        (SELECT COUNT(*) FROM csr_requests WHERE status = 'pending') AS pending_csrs,
-        (SELECT COUNT(*) FROM csr_requests WHERE status = 'approved') AS approved_csrs,
-        (SELECT COUNT(*) FROM issued_certificates WHERE status = 'active') AS active_certs`
-    );
-    res.json({ success: true, data: stats.rows[0] });
+    const [totalCsrs, pendingCsrs, approvedCsrs, activeCerts] = await Promise.all([
+      prisma.csr_requests.count(),
+      prisma.csr_requests.count({ where: { status: "pending" } }),
+      prisma.csr_requests.count({ where: { status: "approved" } }),
+      prisma.issued_certificates.count({ where: { status: "active" } }),
+    ]);
+    res.json({ success: true, data: { total_csrs: String(totalCsrs), pending_csrs: String(pendingCsrs), approved_csrs: String(approvedCsrs), active_certs: String(activeCerts) } });
   } catch (error) {
     console.error("Error fetching admin dashboard stats:", error);
     res.status(500).json({
@@ -468,41 +429,31 @@ exports.getAdminDashboardStats = async (req, res) => {
   }
 };
 
-exports.approveCSR = async (req, res) => {
+const approveCSR = async (req, res) => {
   const { csrId } = req.params;
   try {
-    const csrResult = await pool.query(
-      `SELECT c.*, u.email, u.username 
-       FROM csr_requests c 
-       JOIN users u ON c.user_id = u.id 
-       WHERE c.id = $1 AND c.status = 'pending'`,
-      [csrId]
-    );
+    const csrResult = await prisma.csr_requests.findFirst({
+      where: { id: Number(csrId), status: "pending" },
+      include: { users: { select: { email: true, username: true } } },
+    });
 
-    if (csrResult.rows.length === 0) {
+    if (!csrResult) {
       return res.status(404).json({
         success: false,
         message: "CSR not found or already processed",
       });
     }
 
-    const { id, domain, csr, user_id, email, username } = csrResult.rows[0];
+    const { id, domain, csr, user_id, users } = csrResult;
+    const { email, username } = users;
 
-    await pool.query(
-      `UPDATE csr_requests SET status = 'approved'
-       WHERE id = $1
-       RETURNING id, domain, status`,
-      [csrId]
-    );
+    await prisma.csr_requests.update({
+      where: { id },
+      data: { status: "approved" },
+    });
 
-    let caCertPem, caKeyPem;
-    try {
-      caCertPem = await fsPromises.readFile(CA_CERT_PATH, "utf8");
-      caKeyPem = await fsPromises.readFile(CA_KEY_PATH, "utf8");
-    } catch (fileError) {
-      console.error("Error reading CA files:", fileError);
-      throw new Error("CA certificate or key not found");
-    }
+    const { certificate: caCertPem, private_key: caKeyPem } =
+      await getCaCredentials();
 
     let caCert, caKey;
     try {
@@ -565,12 +516,17 @@ exports.approveCSR = async (req, res) => {
     cert.sign(caKey, forge.md.sha256.create());
     const certPem = forge.pki.certificateToPem(cert);
 
-    const issuedCert = await pool.query(
-      `INSERT INTO issued_certificates (user_id, csr_id, domain, certificate, status, valid_till)
-       VALUES ($1, $2, $3, $4, 'active', $5)
-       RETURNING id, domain, issued_at, valid_till`,
-      [user_id, id, domain, certPem, new Date(cert.validity.notAfter)]
-    );
+    const issuedCert = await prisma.issued_certificates.create({
+      data: {
+        user_id,
+        csr_id: id,
+        domain,
+        certificate: certPem,
+        status: "active",
+        valid_till: new Date(cert.validity.notAfter),
+      },
+      select: { id: true, domain: true, issued_at: true, valid_till: true },
+    });
 
     const certFilePath = path.join(CERT_DIR, `cert_${id}.pem`);
     await fsPromises.writeFile(certFilePath, certPem);
@@ -579,13 +535,13 @@ exports.approveCSR = async (req, res) => {
       email,
       username,
       domain,
-      issuedCert.rows[0].id
+      issuedCert.id
     );
 
     res.json({
       success: true,
       message: "CSR approved and certificate issued",
-      data: issuedCert.rows[0],
+      data: issuedCert,
     });
   } catch (error) {
     console.error("Error approving CSR:", error);
@@ -597,33 +553,34 @@ exports.approveCSR = async (req, res) => {
   }
 };
 
-exports.rejectCSR = async (req, res) => {
+const rejectCSR = async (req, res) => {
   try {
     const { csrId } = req.params;
     const { reason = "No reason provided" } = req.body;
 
-    const csrResult = await pool.query(
-      `SELECT c.*, u.email, u.username FROM csr_requests c JOIN users u ON c.user_id = u.id WHERE c.id = $1 AND c.status = 'pending'`,
-      [csrId]
-    );
+    const csrResult = await prisma.csr_requests.findFirst({
+      where: { id: Number(csrId), status: "pending" },
+      include: { users: { select: { email: true, username: true } } },
+    });
 
-    if (csrResult.rowCount === 0) {
+    if (!csrResult) {
       return res.status(404).json({
         success: false,
         message: "CSR not found or already processed",
       });
     }
 
-    const csrData = csrResult.rows[0];
+    const csrData = csrResult;
 
-    const rejectedCsr = await pool.query(
-      "UPDATE csr_requests SET status = 'rejected', rejection_reason = $1 WHERE id = $2 RETURNING id, domain, status, rejection_reason",
-      [reason, csrId]
-    );
+    const rejectedCsr = await prisma.csr_requests.update({
+      where: { id: Number(csrId) },
+      data: { status: "rejected", rejection_reason: reason },
+      select: { id: true, domain: true, status: true, rejection_reason: true },
+    });
 
     await sendCertificateRejectionEmail(
-      csrData.email,
-      csrData.username,
+      csrData.users.email,
+      csrData.users.username,
       csrData.domain,
       reason
     );
@@ -631,7 +588,7 @@ exports.rejectCSR = async (req, res) => {
     res.json({
       success: true,
       message: "CSR rejected successfully",
-      data: rejectedCsr.rows[0],
+      data: rejectedCsr,
     });
   } catch (error) {
     console.error("Error rejecting CSR:", error);
@@ -689,3 +646,18 @@ async function sendCertificateRejectionEmail(email, username, domain, reason) {
     console.error("Error sending rejection email:", error);
   }
 }
+
+export {
+  generateCSR,
+  submitCSR,
+  downloadFile,
+  downloadCertificate,
+  getUserCSRs,
+  getIssuedCertificates,
+  getPendingCSRs,
+  getAllCSRs,
+  getUserDashboardStats,
+  getAdminDashboardStats,
+  approveCSR,
+  rejectCSR,
+};
